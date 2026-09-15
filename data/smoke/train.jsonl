@@ -1,0 +1,12 @@
+{"image": "assets/smoke_test.png", "question": "Which method performs best at low keep ratios?", "answer": "Our method HAWK"}
+{"image": "assets/method.png", "question": "What does the module predict?", "answer": "The important tokens"}
+{"image": "assets/method.png", "question": "What is the first stage of the pipeline?", "answer": "Vision token encoding"}
+{"image": "assets/method.png", "question": "Which color denotes the proposed approach?", "answer": "The blue line"}
+{"image": "assets/method.png", "question": "Is this a training diagram or an evaluation diagram?", "answer": "It is a training diagram"}
+{"image": "assets/smoke_test.png", "question": "What is shown on the horizontal axis?", "answer": "The keep ratio"}
+{"image": "assets/smoke_test.png", "question": "Is the baseline lower than our curve?", "answer": "Yes it is lower"}
+{"image": "assets/method.png", "question": "Does the method score high on all axes?", "answer": "It scores high on most"}
+{"image": "assets/method.png", "question": "How many axes does this radar chart have?", "answer": "It has five axes"}
+{"image": "assets/smoke_test.png", "question": "What is the title of this chart?", "answer": "Pruning accuracy across ratios"}
+{"image": "assets/method.png", "question": "What color are the pruned tokens?", "answer": "They are grey"}
+{"image": "assets/method.png", "question": "What dataset is this radar over?", "answer": "This is over VLMEvalKit"}

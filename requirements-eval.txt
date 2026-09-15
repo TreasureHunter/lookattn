@@ -1,0 +1,14 @@
+# 评测相关依赖，只有跑 VLMEvalKit 那套（scripts/evaluate_vlmeval.sh）或
+# scripts/evaluate.py 才需要。训练和单图推理不需要装这些。
+#
+# ms-vlmeval 提供 vlmeval 包，scripts/setup_vlmevalkit.sh 会把它复制一份到
+# .runtime/VLMEvalKit 再打补丁，避免动到 site-packages。
+
+-r requirements.txt
+
+datasets==3.6.0
+ms-vlmeval==0.0.18
+pandas>=2.2
+pyarrow>=17
+openpyxl>=3.1
+xlsxwriter>=3.2

@@ -1,0 +1,18 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.env
+.env.*
+.runtime/
+.cache/
+models/
+outputs/
+# 训练数据不入库，但随包附带的冒烟样例要保留
+data/*
+!data/smoke/
+validation/vlmeval_*.json
+vlmeval_results/
+benchmark_results/
+*.log
+tmp/

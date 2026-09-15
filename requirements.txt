@@ -1,0 +1,19 @@
+# 基础环境依赖。先装这些，再跑 scripts/setup_runtime.sh。
+#
+# 注意分工：
+#   - 本文件装进「基础 Python 环境」；
+#   - scripts/setup_runtime.sh 会把 transformers / tokenizers / huggingface-hub /
+#     qwen-vl-utils 以 --target 方式装进项目内的 .runtime/python，并给
+#     transformers 打上 HAWK 补丁（scripts/patch_transformers.py）。
+#   - scripts/run.sh 负责把 src 和 .runtime/python 一起放进 PYTHONPATH。
+#   所以不要把 transformers 装进基础环境后直接用，必须走 run.sh。
+#
+# torch 请按目标机器的 CUDA 版本选对应的 wheel，例如：
+#   pip install torch==2.5.1 torchvision==0.20.1 --index-url https://download.pytorch.org/whl/cu124
+
+torch>=2.5
+torchvision>=0.20
+accelerate==1.4.0
+Pillow==11.0.0
+numpy==1.26.4
+qwen-vl-utils==0.0.11
