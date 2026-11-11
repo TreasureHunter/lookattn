@@ -1,0 +1,72 @@
+\section{Methodology}\label{sec:method}
+\subsection{Multimodal Large Language Models}
+An MLLM takes a textual sequence \(X_t\) and a visual input \(X_v\) (e.g., an image or video) as inputs. The textual input is first tokenized and converted into a sequence of text embeddings \(H_t = \{h_t^1, h_t^2, \ldots, h_t^N\}\), where \(N\) denotes the number of text tokens. Meanwhile, the visual input is processed by a vision encoder to extract visual features, which are then mapped into the embedding space of the LLM through a multimodal projector, producing a sequence of visual token embeddings \(H_v = \{h_v^1, h_v^2, \ldots, h_v^M\}\), where \(M\) denotes the number of visual tokens. This projection enables the LLM to process visual and textual information within a shared embedding space.
+The two embedding sequences are then combined to form a unified multimodal input \([H_t; H_v]\), which is fed into the LLM for joint processing. In practice, the number of visual tokens can be much larger than that of text tokens, i.e., \(M \gg N\), particularly for high-resolution images and long videos. The LLM processes the combined sequence through multiple transformer layers and generates the output sequence \(Y = \{y_1, y_2, \ldots, y_O\}\) in an autoregressive manner. Specifically, the probability of generating \(Y\) conditioned on the multimodal input is given by:
+\begin{equation}
+    P(Y \mid H_t, H_v) = \prod_{i=1}^{O} P(y_i \mid y_{<i}, H_t, H_v),
+\end{equation}
+where \(O\) denotes the output length, \(y_{<i}\) represents all previously generated tokens, and each output token is predicted based on the preceding outputs and the multimodal context.
+
+\subsection{Objective of Visual Token Pruning}
+Visual tokens exhibit varying importance for MLLM generation, with some containing redundant information and others carrying essential details for answering specific questions. Formally, given the original visual token sequence \(H_v\) and the text embedding sequence \(H_t\), the objective is to obtain a pruned visual token sequence \(\tilde{H}_v\) with a predefined token budget \(m\), such that the output of the MLLM remains close to that produced using the full visual token sequence. This objective can be formulated as:
+\begin{equation}
+\tilde{H}_v^* = \operatorname*{arg\,min}_{|\tilde{H}_v|=m}
+\mathcal{L}\left(
+f([\tilde{H}_v;H_t]),
+f([H_v;H_t])
+\right),
+\label{eq:obj}
+\end{equation}
+where \(f\) denotes the LLM, \(\tilde{H}_v^*\) represents the optimal compressed visual representation derived from the original visual tokens, and \(\mathcal{L}\) measures the difference between the outputs generated using the compressed and original visual representations. The token budget \(m\) controls the compression level. The key challenge is to construct a compact visual representation that preserves the information necessary for model understanding and generation. In particular, token importance depends not only on visual content but also on the textual instruction and downstream task. Therefore, an effective pruning strategy should preserve informative and task-relevant visual information while reducing redundant representations.
+
+\subsection{AnchorMerge}
+Given the visual token sequence $H_v\in\mathbb{R}^{M\times d}$ and a token budget $m$, AnchorMerge constructs a compact representation $C\in\mathbb{R}^{m\times d}$ that preserves the information required by the frozen LLM. In contrast to methods that select a subset of visual tokens and discard the rest, AnchorMerge performs no discrete selection. It partitions the visual tokens into contiguous local regions, keeps one real token in each region as an anchor, and learns to merge the information of the remaining tokens into that anchor. Since the resulting representation depends only on the image and not on the question, it is computed once per image and reused across all turns of a multi-turn conversation.
+
+We partition the $M$ visual tokens, arranged in raster order, into $m$ contiguous regions $S_1,\ldots,S_m$ of length $L_k\approx M/m$. For each region, we select the token with the highest average cosine similarity to all tokens in the region as the anchor:
+\begin{equation}
+\begin{aligned}
+z_i&=\frac{h_i}{\lVert h_i\rVert},\qquad
+s_i=\frac{1}{L_k}\sum_{j\in S_k}z_i^\top z_j,\\
+i_k^\star&=\operatorname*{arg\,max}_{i\in S_k}s_i,\qquad
+a_k=h_{i_k^\star}.
+\end{aligned}
+\label{eq:anchor}
+\end{equation}
+This selection involves no learnable parameters and is deterministic. Because every region produces one representative, the spatial coverage of the compressed sequence is guaranteed by construction, independent of any learned criterion. In addition, the anchor is a real visual token, and therefore lies on the visual token manifold seen by the LLM during training.
+
+The anchor is a region-level representative and cannot alone capture the within-region variations. We therefore compute the residual of each token with respect to its anchor and use a small scoring network, together with the original cosine similarity, to determine how much each residual should contribute:
+\begin{equation}
+u_i=\operatorname{MLP}_{res}(r_i)+\cos(h_i,a_k),\qquad
+w_i=\frac{\exp(u_i/\tau)}{\sum_{j\in S_k}\exp(u_j/\tau)},
+\label{eq:weights}
+\end{equation}
+where $r_i=h_i-a_k$ and $\tau$ is a temperature. The softmax is applied to the aggregation weights rather than to a selection decision, so the compressor remains fully differentiable and does not suffer from the instability of discrete token selection. The weighted residuals are then summarized by their mean and standard deviation:
+\begin{equation}
+\mu_k=\sum_{i\in S_k}w_i r_i,\qquad
+\sigma_k=\Big(\sum_{i\in S_k}w_i(r_i-\mu_k)^2+\epsilon\Big)^{1/2},
+\label{eq:stats}
+\end{equation}
+which describe the dominant direction and the spread of the residual information in region $k$, respectively.
+
+We concatenate the two statistics into $v_k=[\mu_k\,\Vert\,\sigma_k]\in\mathbb{R}^{2d}$ and feed them to a write-in network that predicts a $d$-dimensional correction, together with a lightweight gating network that controls the amount of correction:
+\begin{equation}
+\delta_k=W_2\operatorname{GELU}(W_1v_k+b_1)+b_2,\qquad
+g_k=\tanh\big(\operatorname{gate}_\phi(v_k)\big),
+\label{eq:write}
+\end{equation}
+and the output of region $k$ is obtained by
+\begin{equation}
+c_k=a_k+g_k\delta_k,\qquad
+c_k\leftarrow c_k\cdot\frac{\lVert a_k\rVert}{\max(\lVert c_k\rVert,\epsilon)} .
+\label{eq:fuse}
+\end{equation}
+The output layer of the write-in network is initialized with a small scale and zero bias, and the last layer of the gating network is zero-initialized. Consequently, $g_k\equiv 0$ and $c_k\equiv a_k$ at the beginning of training, so the compressor starts from the identity mapping and cannot corrupt the LLM input at initialization. The norm anchoring in Eq.~\eqref{eq:fuse} further guarantees $\lVert c_k\rVert=\lVert a_k\rVert$ by construction: the fusion changes only the direction of the representation, while its magnitude remains identical to that of a real visual token. The gating network is shared across regions and depends only on $v_k$, so the compressor contains no parameter whose shape depends on the budget $m$.
+
+The compressor is trained while the vision encoder, the projector, and the LLM are frozen. The training objective combines answer supervision with visual reconstruction:
+\begin{equation}
+\mathcal{L}=\mathcal{L}_{\mathrm{CE}}+\lambda\,\mathcal{L}_{\mathrm{REC}}.
+\label{eq:loss}
+\end{equation}
+Here $\mathcal{L}_{\mathrm{CE}}$ is the cross-entropy loss of the frozen LLM on the ground-truth answer, which encourages the compressed representation to retain the information needed to answer the question. $\mathcal{L}_{\mathrm{REC}}$ reconstructs the original $M$ visual tokens from $C$ with a lightweight cross-attention decoder, providing dense token-level supervision that prevents the compressor from discarding visual details irrelevant to the current training answers. The decoder is used only during training and is removed at inference. The two objectives are complementary: the former preserves task-relevant information, while the latter preserves fine-grained visual content.
+
+At inference, given a budget $m$, AnchorMerge directly outputs the $m$ rows of $C$ and inserts them into the \texttt{<image>} placeholder of the prompt. All operations are shared per-region functions, so the same weights support different budgets without retraining, and the compressed representation of an image can be reused across all turns of a conversation.
