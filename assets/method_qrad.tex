@@ -1,6 +1,5 @@
+%% TODO: ListMLE Loss的形式
 \section{Methodology}\label{sec:method}
-% In this section, we first formulate the objective of visual token pruning, then present our observation and finally describe \textbf{QRAD} in detail.
-
 \subsection{Objective of Visual Token Pruning}
 During MLLM inference, only a small subset of visual tokens is typically relevant to the question, resulting in substantial redundancy among visual tokens. Given the original visual representations $H_v$ and text token representations $H_q$, the objective of visual token pruning is:
 \begin{equation}
@@ -10,54 +9,54 @@ During MLLM inference, only a small subset of visual tokens is typically relevan
 where $\hat{H}_v$ denotes the retained visual representations, $k$ is the number of retained visual tokens, and $f$ is the LLM model. The challenge is to find the optimal subset $\hat{H}_v$ that minimizes the loss $\mathcal{L}$ while preserving the semantic information of the original visual representations.
 
 \subsection{Observation} \label{sec:obs}
-FastV~\cite{fastv} ranks visual tokens according to the attention they receive from the last token in the second LLM layer and retains only the top-ranked tokens for subsequent layers to reduce computational costs. This approach relies on the assumption that shallow-layer attention can effectively identify query-relevant visual tokens. However, shallow-layer attention may be affected by attention sinks and biased attention patterns~\cite{sink,dsas}, making it less reliable for identifying visual evidence relevant to the query. As the layer depth increases, attention becomes progressively more focused on visual regions that support answering the question. To validate this, we conduct an analysis on 10,000 training samples from three datasets: OCRVQA~\cite{ocrvqa}, TextVQA~\cite{textvqa}, and COCO Karpathy~\cite{karpathy2015deep}, as they cover document-like text, in-the-wild text, and general visual scenes, with both short-answer QA. We use Qwen2.5-VL-7B~\cite{qwen3vl} for evaluation; the same analyses for Llava-1.5-7B~\cite{llava1.5} and Qwen3-VL-8B~\cite{qwen2.5} are shown in Appendix~\ref{app:1}.
+FastV~\cite{fastv} ranks visual tokens according to the attention they receive from the last token in the second LLM layer and retains only the top-ranked tokens for subsequent layers to reduce computational costs. This approach assumes that shallow-layer attention can effectively identify query-relevant visual tokens. However, shallow-layer attention may be affected by attention sinks and biases~\cite{sink,dsas}, making it less reliable for estimating token importance. We hypothesize deep-layer attention distributions could provide more reliable signals. To validate this, we conduct an analysis on 5,000 training samples from each of three datasets: OCRVQA~\cite{ocrvqa}, TextVQA~\cite{textvqa}, and COCO Karpathy~\cite{karpathy2015deep}, as they cover document-like text, in-the-wild text, and general visual scenes, and all involve short-answer QA. We use Qwen2.5-VL-7B~\cite{qwen2.5} for evaluation; the same analyses on Llava-1.5-7B~\cite{llava1.5} and Qwen3-VL-8B~\cite{qwen3vl} are provided in Appendix~\ref{app:1}.
 
-Specifically, we first perform a full forward pass to extract the last-token attention over visual tokens at each layer $\ell$. Based on these attention scores, we capture the top-20\% visual tokens at each layer. We then construct a reduced visual input using the selected tokens and feed it into the model again, performing a new prefilling pass followed by autoregressive decoding to generate the answer. By evaluating the resulting VQA performance, we measure how effectively the attention at each layer identifies the visual tokens necessary for answering questions. As shown in Figure~\ref{fig:obs}, the results reveal that shallow-layer attention is insufficient for identifying the visual evidence required for answering, while the token selection performance improves with layer depth and peaks at the final layer. Appendix~\ref{app:1} shows consistent trends on Qwen3-VL-8B and LLaVA-1.5-7B. We therefore select the final LLM layer as the teacher layer in QRAD.
-These findings establish final-layer attention as a more reliable signal for estimating visual token importance. This motivates us to explore whether a lightweight learnable module can \textbf{predict final-layer attention scores from the initial text and visual representations}, enabling more accurate visual token pruning.
+Specifically, we first perform a full forward pass to extract the last-token attention over visual tokens at each layer. Based on these attention scores, we capture the top-20\% visual tokens at each layer. We then construct a reduced visual input using the selected tokens and feed it into the model again, performing a new prefilling pass followed by autoregressive decoding to generate the answer. By evaluating the resulting VQA performance, we measure how effectively the attention at each layer identifies the visual tokens necessary for answering questions. As shown in Figure~\ref{fig}, the results reveal that shallow-layer attention is insufficient for identifying visual evidence required for answering, while deep-layer attention generally provides better token selection signals, with the best results achieved at a later layer rather than the final layer. Appendix~\ref{app:1} shows similar trends on LLaVA-1.5-7B and Qwen3-VL-8B. We therefore select the layer that achieves the best average performance across the three datasets as the teacher layer in QRAD, providing consistently strong performance across different tasks.
+These findings establish deep-layer attention as a more reliable signal for visual token importance estimation. This motivates us to explore whether a lightweight learnable module can \textbf{predict deep-layer attention scores from the initial text and visual representations}, enabling accurate visual token pruning.
 
 \subsection{Retrieval-head Identification}
 \label{sec:heads}
-Attention heads in LLMs are functionally specialized~\cite{hawk,vera,baek2025large,park2026retrieval}: some heads retrieve relevant context, and some attend locally~\cite{duo}. Consequently, averaging the attention of all heads in the final layer is not an optimal importance signal: the average could dilute the heads that localize the evidence. 
-To identify retrieval heads, we use the OCRVQA and TextVQA samples introduced in Section~\ref{sec:obs} using Qwen2.5-VL-7B. For each head, we first evaluate its ability to identify important visual tokens following Section~\ref{sec:obs}, replacing layer-level attention with the attention of an individual head for top-20\% token selection. We then measure how much attention the head assigns to visual tokens. Specifically, we sum the attention weights from the last token $r_{\mathrm{last}}$ over all visual tokens $N_v$ and average them across the sampled dataset:
+Attention heads in LLMs are functionally specialized~\cite{hawk,vera,baek2025large,park2026retrieval}: some heads retrieve relevant context, and some attend locally~\cite{duo}. Consequently, averaging the attention of all heads in the selected layer is not an optimal importance signal: the average could dilute the heads that localize the evidence. 
+To identify retrieval heads, we use the training samples introduced in Section~\ref{sec:obs} with Qwen2.5-VL-7B. For each head, we first evaluate its ability to identify important tokens following Section~\ref{sec:obs}, replacing layer-level attention with the attention of an individual head for top-20\% visual token selection. We then measure how much attention each head assigns to visual tokens. Specifically, we sum the attention weights from the last token $r_{\mathrm{last}}$ over all visual tokens $N_v$ and average them across the sampled dataset:
 \begin{align}
 \alpha_h &= \frac{1}{|\mathcal{D}|}
 \sum_{i\in\mathcal{D}}\sum_{j\in N_v}
-A_{L,h}^{(i)}[r_{\mathrm{last}}, j], \\
-A_{L,h}^{(i)} &=
+A_{l^*,h}^{(i)}[r_{\mathrm{last}}, j], \\
+A_{l^*,h}^{(i)} &=
 \mathrm{softmax}\left(
-\frac{Q_{L,h}^{(i)}(K_{L,h}^{(i)})^\top}
+\frac{Q_{l^*,h}^{(i)}(K_{l^*,h}^{(i)})^\top}
 {\sqrt{d_h}}
 \right),
 \end{align}
-where $\mathcal{D}$ denotes the sampled dataset, $L$ is the last LLM layer, and $Q_{L,h}^{(i)}$ and $K_{L,h}^{(i)}$ are the query and key matrices of head $h$ for sample $i$, respectively. $d_h$ is the head dimension. Here, $\alpha_h$ measures the average attention mass that head $h$ assigns to visual tokens, with a larger value indicating higher attention to visual content.
-As shown in Figure~\ref{fig:heads}(a), the attention scores $\alpha_h$ exhibit a clear separation between heads that attend more to visual tokens and those that do not. Interestingly, higher attention to visual tokens does not necessarily provide better token selection, as some heads with high $\alpha_h$ have relatively low accuracy.
+where $\mathcal{D}$ denotes the sampled dataset, $l^*$ is the selected deep layer, and $Q_{l^*,h}^{(i)}$ and $K_{l^*,h}^{(i)}$ are the query and key matrices of head $h$ for sample $i$, respectively. $d_h$ is the head dimension. Here, $\alpha_h$ measures the average attention mass that head $h$ assigns to visual tokens, with a larger value indicating higher attention to visual content.
+As shown in Figure~\ref{fig:heads}(a), $\alpha_h$ exhibits a clear separation between heads that attend more to visual tokens and those that do not. Interestingly, higher attention to visual tokens does not necessarily provide better token selection, as some heads with high $\alpha_h$ have relatively low accuracy. Nevertheless, heads with the highest $\alpha_h$ values still achieve high accuracy.
 
 We therefore further examine the attention patterns of each head across question and generation positions. We define the generation-to-question attention ratio as:
 \begin{align}
 \rho_h = \frac{1}{|\mathcal{D}|}
 \sum_{i\in\mathcal{D}}
 \frac{
-\sum\limits_{j\in N_v} A_{L,h}^{(i)}[r_{\mathrm{last}},j]
+\sum\limits_{j\in N_v} A_{l^*,h}^{(i)}[r_{\mathrm{last}},j]
 }{
 \frac{1}{|\mathcal{R}_q^{(i)}|}
 \sum\limits_{r\in\mathcal{R}_q^{(i)}}
-\sum\limits_{j\in N_v} A_{L,h}^{(i)}[r,j]
+\sum\limits_{j\in N_v} A_{l^*,h}^{(i)}[r,j]
 },
 \end{align}
 where $\mathcal{R}_q^{(i)}$ denotes the positions of question tokens in sample $i$. A larger $\rho_h$ indicates that a head increases its attention to visual tokens more substantially at the generation position relative to the question positions.
-As shown in Figure~\ref{fig:heads}(b), some heads with high accuracy exhibit a pronounced increase in attention to visual tokens at the generation position, i.e., a larger $\rho_h$. Similar experimental results are observed on Qwen3-VL-8B and LLaVA-1.5-7B, as shown in Appendix~\ref{app:2}.
+As shown in Figure~\ref{fig:heads}(b), some heads with high accuracy exhibit a pronounced increase in attention to visual tokens at the generation position, i.e., a larger $\rho_h$. Similar experimental results are observed on LLaVA-1.5-7B and Qwen3-VL-8B, as shown in Appendix~\ref{app:2}.
 
-Based on these observations, we find that the two attention signals capture complementary properties of visual information. A head with a higher $\alpha_h$ captures broader visual information, while a head with a higher $\rho_h$ more precisely localizes visual evidence, as reflected by their final accuracy. Combining their attention distributions therefore provides a more comprehensive and precise importance signal for visual token pruning. Importantly, we do not select heads based on their inference accuracy on the sampled datasets, as such performance-based selection may not generalize well to different samples. Instead, we identify two complementary retrieval heads using the criteria: the head with the highest $\alpha_h$ and the head with the highest $\rho_h$. This provides a principled and generalizable approach to identifying retrieval heads based on attention patterns, without relying on sample-specific performance.
-
+Based on these observations, we find that the two attention signals capture complementary properties of visual information. Heads with higher $\alpha_h$ capture broader visual information, whereas those with higher $\rho_h$ more precisely localize visual evidence, as reflected by their final accuracy. Combining their attention distributions therefore provides a more comprehensive and precise importance signal for visual token pruning. 
+To select the teacher layer, we consider the average performance across datasets to reduce the influence of data-specific variations. Within the selected layer, we further identify retrieval heads based on two complementary attention patterns rather than directly ranking individual heads by their inference accuracy. Specifically, we select one head with the highest $\alpha_h$ and another head with the highest $\rho_h$ among the top 25\% of heads ranked by $\alpha_h$. This restriction ensures that the latter head also exhibits substantial attention to visual tokens, while providing a complementary attention pattern to the former. Their combined attention distributions serve as the teacher signal for training the visual token scorer. \textbf{This provides a principled approach to identifying complementary retrieval heads based on their attention patterns.}
 \subsection{QRAD Training and Inference}
 \label{sec:qrad}
 
-Based on the identified retrieval heads, we propose QRAD to distill their complementary attention distributions into a lightweight scorer. The scorer learns to predict visual token importance from the initial visual and textual features before the LLM runs. It offers two benefits: (1) avoiding the extra LLM prefill, and (2) introducing negligible inference overhead. Figure~\ref{fig:framework} illustrates the overall framework.
+Based on the selected layer and retrieval heads, we propose QRAD to distill their attention distributions into a lightweight scorer. The scorer learns to predict visual token importance before LLM runs. It offers two benefits: (1) providing direct supervision from the LLM's task-relevant attention patterns, and (2) introducing negligible inference overhead. Figure~\ref{fig:framework} illustrates the overall framework.
 
 \textbf{Teacher signal.}
-Let $\mathcal{H}$ denote the retrieval heads selected in Section~\ref{sec:heads}, and let $L$ denote the final LLM layer. Given visual tokens $N_v$ and the last prompt token $r_{\mathrm{last}}$, we extract the attention scores $A_{L,h}$ for each $h\in\mathcal{H}$. We first average the attention scores across the selected heads and then normalize them to obtain the teacher distribution:
+Let $\mathcal{H}$ denote the retrieval heads selected in Section~\ref{sec:heads}, and let $l^*$ denote the selected deep layer. Given visual tokens $N_v$ and the last prompt token $r_{\mathrm{last}}$, we extract the attention scores $A_{l^*,h}$ for each $h\in\mathcal{H}$. We first average the attention scores across the selected heads and then normalize them to obtain the teacher distribution:
 \begin{equation}
-\bar A_j=\frac{1}{|\mathcal{H}|}\sum_{h\in\mathcal{H}}A_{L,h}[r_{\mathrm{last}},j],
+\bar A_j=\frac{1}{|\mathcal{H}|}\sum_{h\in\mathcal{H}}A_{l^*,h}[r_{\mathrm{last}},j],
 \qquad
 t_j=\frac{\bar A_j}{\sum\limits_{j'\in N_v}\bar A_{j'}}.
 \label{eq:teacher}
@@ -72,7 +71,7 @@ We introduce a lightweight cross-attention scorer $g_\phi$ to estimate visual to
 \label{eq:input_projection}
 \end{equation}
 where $P_v,P_q\in\mathbb{R}^{D\times d}$ and $b_v,b_q\in\mathbb{R}^{d}$.
-The projected visual and text features $\tilde{H}_v,\tilde{H}_q$ are then fed into a cross-attention block. The block consists of a cross-attention layer followed by a feed-forward netword. Each operation uses pre-LayerNorm (LN) and a residual connection:
+The projected visual and text features $\tilde{H}_v,\tilde{H}_q$ are then fed into a cross-attention block. The block consists of a cross-attention layer followed by a feed-forward network. Each operation uses pre-LayerNorm (LN) and a residual connection:
 \begin{equation}
 \begin{aligned}
 Q &= W_Q\,\mathrm{LN}(\tilde{H}_v),
@@ -91,12 +90,12 @@ W_1\operatorname{LN}(X)+b_1
 \right)+b_2\big),
 \label{eq:token_scoring}
 \end{equation}
-where $W_1\in\mathbb{R}^{d\times d1}$ and $W_2\in\mathbb{R}^{d1\times 1}$. This produces a student distribution $\mathbf{s}\in\mathbb{R}^{N_v}$, with each entry corresponding to one visual token.
+where $W_1\in\mathbb{R}^{d\times d_1}$ and $W_2\in\mathbb{R}^{d_1\times 1}$. This produces a student distribution $\mathbf{s}\in\mathbb{R}^{N_v}$, with each entry corresponding to one visual token.
 
 \textbf{Training.}
 We freeze the vision encoder and the LLM and train only the scorer. One iteration consists of three steps:
 \begin{enumerate}
-  \item \emph{Teacher forward.} Compute the teacher distribution ${\mathbf{t}}$ from the retrieval heads in the final layer.
+  \item \emph{Teacher forward.} Compute the teacher distribution ${\mathbf{t}}$ from the retrieval heads in the selected deep layer.
   \item \emph{Scorer forward.} Compute the student logits $\mathbf{s}=g_\phi(H_v,H_q)$ using the lightweight scorer.
   \item \emph{Loss.} Let $\pi=(\pi_1,\ldots,\pi_{N_v})$ denote the visual token indices sorted by the teacher scores ${\mathbf{t}}$ in descending order. We combine a distribution-matching term with a listwise ranking term:
   \begin{align}
@@ -111,32 +110,3 @@ The KL term provides a dense signal by matching the full teacher distribution. F
 
 \textbf{Inference.}
 Given $H_v$ and $H_q$, the scorer $g_\phi$ produces $\mathbf{s}$; we retain the top-$k$ visual tokens, where $k=\left\lfloor \eta N_v\right\rfloor,$ and $\eta$ is the retention rate. Only the kept tokens are passed to the LLM for answer generation. Thus, QRAD introduces only one lightweight forward pass before LLM inference.
-
-% The scorer $g_\phi$ is the only trainable component of QRAD; the vision
-% encoder and the LLM stay frozen. Given visual features
-% $H_v\in\mathbb{R}^{N_v\times D}$ and question embeddings
-% $H_q\in\mathbb{R}^{N_q\times D}$, it outputs one importance logit per visual
-% token. Both inputs are linearly projected into a shared $d$-dimensional
-% space, and a single cross-attention block lets each visual token, used as a
-% query, read from the question tokens, used as keys and values:
-% \begin{equation}
-% X=\big(\tilde H_v+O\big)+\operatorname{FFN}\!\left(\mathrm{LN}(\tilde H_v+O)\right),
-% \quad
-% O=\operatorname{MHA}\!\left(\mathrm{LN}(\tilde H_v),\,\mathrm{LN}(\tilde H_q),\,\mathrm{LN}(\tilde H_q)\right),
-% \label{eq:cross_attention_block}
-% \end{equation}
-% where $\operatorname{MHA}$ is multi-head attention and the FFN is a standard
-% two-layer MLP---two linear layers with a GELU nonlinearity in between and a
-% $4\times$ wider hidden dimension ($d\to4d\to d$). One block is sufficient
-% here: its role is to aggregate question-relevant evidence for ranking, not to
-% model visual content. A final LayerNorm and a token-wise MLP ($d\to256\to1$)
-% then map each visual token independently to a logit:
-% \begin{equation}
-% s_j=W_2\,\mathrm{GELU}\!\left(W_1\,\mathrm{LN}_{out}(X_j)+b_1\right)+b_2,
-% \label{eq:token_scoring}
-% \end{equation}
-% yielding $\mathbf{s}\in\mathbb{R}^{N_v}$. We use $d=768$ and 8 attention
-% heads. The scorer has 10.4M parameters for $D=3584$ and 11.2M for $D=4096$.
-% Since the question enters only as keys and values, every visual token is
-% scored conditioned on the question, and the scorer requires neither LLM
-% hidden states nor an additional LLM forward pass.
