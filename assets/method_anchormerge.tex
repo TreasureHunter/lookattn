@@ -1,40 +1,6 @@
-\textbf{Method workflow.} Given the visual token sequence $H_v\in\mathbb{R}^{M\times d}$ and a token budget $m$, AnchorMerge constructs a compact representation $C\in\mathbb{R}^{m\times d}$ that preserves information required by the LLM. Unlike methods that retain a subset of visual tokens and discard the rest~\cite{divprune,holov,dart}, AnchorMerge further incorporates information from the pruned tokens into the retained representations. Inspired by HoloV~\cite{holov}, which partitions visual tokens into spatial crops and performs crop-wise token selection to preserve holistic visual context, we divide the raster-ordered visual tokens into $m$ contiguous segments and select one original token from each segment as an anchor. This uniform segment-wise selection ensures that every visual token is covered, which is particularly important for multi-turn VQA, where future questions are unknown and may focus on different visual regions.
-
-Specifically, we divide the $M$ visual tokens into $m$ contiguous segments, denoted by $S_1,\ldots,S_m$, each containing approximately $M/m$ tokens. Within each segment, we select the token with the highest average cosine similarity to all tokens in the same segment as the anchor:
+Specifically, we employ a lightweight reconstruction decoder to recover the original visual features from $C$. The decoder takes $C$ as input and uses learnable transformations of sinusoidal positional embeddings as queries, enabling it to reconstruct features at the original visual token positions:
 \begin{equation}
-\begin{aligned}
-z_i&=\frac{h_i}{\lVert h_i\rVert},\qquad
-s_i=\frac{1}{L_k}\sum_{j\in S_k}z_i^\top z_j,\\
-i_k^\star&=\operatorname*{arg\,max}_{i\in S_k}s_i,\qquad
-a_k=h_{i_k^\star},
-\end{aligned}
-\label{eq:anchor}
+R=\mathcal{D}_{\psi}(C,N),
+\label{eq:recon}
 \end{equation}
-where $h_i$ denotes the original feature of the $i$-th visual token, $z_i$ is its normalized feature, and $L_k=|S_k|$ is the number of tokens in the $k$-th segment. Here, $s_i$ measures the average similarity of token $i$ to all tokens in its segment, $i_k^\star$ denotes the index of the selected anchor, and $a_k$ is the anchor's representation. 
-An anchor is a single representative of its segment and cannot capture the remaining content, which would otherwise be discarded. Inspired by the contextual token merging strategy in VisionZip~\cite{visionzip}, which aggregates information from non-dominant tokens into target tokens based on feature similarity, we further incorporate information from the pruned tokens into their corresponding anchors. Specifically, we compute the residual between each non-anchor token and its anchor, and use a lightweight scoring network together with cosine similarity to determine the contribution of each residual:
-\begin{equation}
-u_i=\operatorname{MLP}(r_i)+\cos(h_i,a_k),\,
-w_i=\frac{\exp(u_i)}{\sum\limits_{j\in \mathcal{R}_k}\exp(u_j)},
-\label{eq:weights}
-\end{equation}
-where $\mathcal{R}_k=S_k\setminus{i_k^\star}$ denotes the set of non-anchor tokens in segment $k$, $r_i=h_i-a_k$ is the residual of token $i$ relative to its anchor, and $\operatorname{MLP}(\cdot)$ is a two-layer scoring network with an intermediate GELU activation. $u_i$ measures the contribution of each residual, while $w_i$ is the normalized value by applying softmax over the non-anchor tokens in the same segment, satisfying $\sum_{i\in S_k}w_i=1$.
-
-To reflect the distribution of residual information within each segment, we summarize the weighted residuals using their mean and standard deviation:
-\begin{equation}
-\mu_k=\sum_{i\in \mathcal{R}_k}w_i r_i,\qquad
-\sigma_k=\sqrt{\sum_{i\in \mathcal{R}_k}w_i(r_i-\mu_k)^2},
-\end{equation}
-where $\mu_k$ reflects the dominant direction of the residuals and $\sigma_k$ reflects their spread. Together, these two statistics provide a compact summary of the residual distribution within segment $k$. 
-To incorporate this statistical information into the anchor representation, we concatenate the two statistics into $v_k=[\mu_k\Vert\sigma_k]\in\mathbb{R}^{2d}$ and feed it into two lightweight networks. Specifically, a write-in network maps $v_k$ to the correction vector $\delta_k$, which specifies the feature update to be applied to the anchor. Meanwhile, a gating network predicts a scalar gate $g_k\in(-1,1)$ to adaptively control the contribution of this correction. The gate allows each segment to adjust its anchor representation with a different intensity. It is calculated as follows:
-\begin{equation}
-\delta_k=W_2\operatorname{GELU}(W_1v_k+b_1)+b_2,\,
-g_k=\tanh\big(\phi(v_k)\big),
-\label{eq}
-\end{equation}
-where the write-in network is a two-layer MLP, and $\phi$ is a two-layer MLP with a scalar output. The gating network is shared across all segments and takes their respective $v_k$ as input, producing segment-specific gates. We then integrate the correction vector $\delta_k$ into the anchor through gated fusion:
-\begin{equation}
-c_k=a_k+g_k\delta_k,\qquad
-c_k\leftarrow c_k\cdot\frac{\lVert a_k\rVert}{\lVert c_k\rVert}.
-\label{eq:fuse}
-\end{equation}
-The scalar gate $g_k$ controls the overall contribution of the correction, while the norm adjustment preserves the magnitude of the original anchor representation.
+where $R\in\mathbb{R}^{N\times d}$ denotes the reconstructed visual features, $N$ is the number of original visual tokens, and $\mathcal{D}_{\psi}$ denotes the reconstruction decoder. We use the original visual features $X\in\mathbb{R}^{N\times d}$ before compression as the reconstruction target. The decoder is trained jointly with AnchorMerge, while $X$ is kept fixed.
