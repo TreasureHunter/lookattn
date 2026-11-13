@@ -2,9 +2,13 @@ You are an expert Scientific Illustrator for top-tier AI conferences (NeurIPS/CV
 Your task is to generate a professional "Illustration" (main figure for the paper) based on a research paper abstract and methodology.
 I have provided you with a reference image. Please use it as a stylistic reference, but do not copy it rigidly. 
 Create the figure in an editable PowerPoint format so that I can continue modifying it later.
+
 **Abstract:**
+
 Multimodal large language models (MLLMs) incur substantial computational and memory overhead due to the large number of visual tokens and their associated KV cache. To mitigate these costs, various visual token pruning methods have been proposed. However, most methods are designed for single-turn VQA and struggle to preserve visual information relevant to diverse questions across multi-turns. To address this challenge, we propose AnchorMerge, a learnable visual token pruning method for multi-turn VQA. Specifically, AnchorMerge partitions visual tokens into contiguous local regions and selects a representative token from each region as an anchor. It then aggregates information from the remaining tokens into each anchor through learnable weighted aggregation and gated fusion. To further enhance these representations, we introduce a dual-objective framework that combines downstream VQA task optimization with visual feature reconstruction. The former retains task-relevant information, while the latter captures fine-grained visual details. Although trained with VQA objectives, AnchorMerge performs query-independent pruning at inference time, allowing a single pruned representation to be reused across multi-turns. Extensive experiments on five MLLMs across three multi-turn VQA benchmarks demonstrate the effectiveness of AnchorMerge. At a 10\% visual token retention rate, AnchorMerge outperforms the strongest baseline by 3.77, 4.25, and 4.60 points on LLaVA-1.5-7B, LLaVA-NeXT-Vicuna-7B, and Qwen2.5-VL-7B, respectively. Meanwhile, it achieves a 2.28$\times$ speedup in prefilling and reduces GPU memory to 15.1\% of the full cache setting.
+
 **Methodology:**
+
 \section{Methodology}\label{sec:method}
 \subsection{Multimodal Large Language Models}
 An MLLM takes a visual input \(X_v\) (e.g., an image or video) and a textual sequence \(X_t\) as inputs. The visual input is processed by a vision encoder to extract visual features, which are then mapped into the embedding space of the LLM through a multimodal projector, producing a sequence of visual token embeddings \(H_v = \{h_v^1, h_v^2, \ldots, h_v^M\}\), where \(M\) denotes the number of visual tokens. This projection enables the LLM to process visual and textual information within a shared embedding space.Meanwhile, the textual input is tokenized and converted into a sequence of text embeddings \(H_t = \{h_t^1, h_t^2, \ldots, h_t^N\}\), where \(N\) denotes the number of text tokens. 
@@ -112,7 +116,9 @@ The two supervision signals are jointly optimized using:
 \label{eq:total_loss}
 \end{equation}
 where $\lambda$ controls the contribution of visual feature reconstruction. 
+
 **Visual Style Requirements:**
+
 1.  **Style:** Flat vector illustration, clean lines, academic aesthetic. Similar to figures in DeepMind or OpenAI papers.
 2.  **Layout:** Organized flow (Left-to-Right, Top-to-Bottom, Circular and other shapes). Group related components logically.
 3.  **Color Palette:** Professional pastel tones. White background.
